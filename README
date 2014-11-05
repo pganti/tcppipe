@@ -1,0 +1,252 @@
+TCPPIPE provides a solution for generating and maintaining a reliable and timely log delivery
+
+The TCPPIPE package comprises two programs -- tcppipe and tcppiped.
+The two programs work together to establish a file pipe between
+two hosts.
+
+The pipe allows the contents of one file (the origin file) residing
+on one host to be copied to a second file (the destination file),
+which may reside on a remote host. Further more, the destination 
+file is updated in realtime whenever the origin file was changed 
+incrementally, i.e., if a line is appended to the origin file the 
+same line will be immediately appended to the destination file.
+
+To accomplish this, tcppipe must run on the host where the origin
+file resides, and tcppiped, on the host where the destination
+file resides. In a client-server model, the tcppipe program is the
+client and the tcppiped program is the server. All connections are
+initiated by tcppipe, i.e. the client side, and whether the pipe
+is established is decided by tcppiped, i.e. the server, by looking
+at a configuration file /etc/tcppipe.conf, where all pipes to that
+host are defined.
+
+Thus, for example, to send log file /opt/ins-accel/access_log/access.log on
+ctl.insnw.net to /var/log/z1/ctl/messages on archive.insnw.net
+and update the file in realtime:
+
+i) Place the following entry in /etc/tcppipe.conf on archive.insnw.net,
+
+	ctl.insnw.net:/opt/ins-accel/access_log/access.log | /var/log/z1/ctl/messages
+
+ii) start tcppiped program on archive.insnw.net (assuming the
+default configuration file /etc/tcppipe.conf), i.e. by typing on
+the command line:
+
+	tcppiped
+
+iii)run tcppipe program on host ctl.insnw.net to establish the
+pipe to archive.insnw.net, by typing on the command line:
+
+	tcppipe -h archive.insnw.net -f /var/log/messages
+
+/var/log/messages on ctl.insnw.net will be copied to
+/var/log/z1/ctl/messages on archive.insnw.net first, then tcppipe
+will check the file /var/log/messages on ctl.insnw.net every second.
+If there are any new messages appended to it, the newly-appended
+messages will immediately be sent to archive.insnw.net.
+
+Notes:
+
+    i) tcppiped must already be running on the destination site
+    before tcppipeis started on the origin side.
+
+    ii) tcppiped should be started only once, at boot-time, on the
+    destination host. It will spawn additional processes to handle 
+    every new pipe.  All the pipes can be defined in one configuration 
+    file. Thus, to send and update another file, i.e. add another
+    pipe, two things must be done: First, define the new pipe in
+    tcppipe.conf at the destination host so that tcppiped will be
+    able to handle it. Second, at the origin host, tcppipe must be
+    running to begin the update process.
+
+
+IV. USAGE
+
+1. tcppipe -- send a file to remote host and later update it in real time
+
+    USAGE: tcppipe -f <filename> -h <hostname> [-p port#] [-t] [-n]
+    [-I]
+
+    Option    Sepcifies
+    -----------------------------------------------------------------
+
+    -f     which origin file is to be read
+
+    -h     host where the contents of file are sent
+
+    -p     the port the server process 'tcppiped' is listening on;
+           6514 by default
+
+    -t     the time interval of updating file contents at remote
+           host, in seconds
+
+    -n     direct tcppipe to send the entire file instead of newly appended
+           lines by refering to the history information saved. 
+
+    -I     print PID, see below, section 4.
+
+    -----------------------------------------------------------------
+2. tcppiped -- collect messages from different pipes and put them
+into corresponding files
+
+    USAGE: tcppiped [-f configuration file] [-p port#]
+
+    Option    Specifies
+   ---------------------------------------------------------------
+
+    -f  configuration file which comprises entries about
+        which file from which host goes to which local file: for details
+        see next section, "configuration file"
+
+    -p specifies which port to listen on; 6514 by default
+
+3.  "/etc/tcppipe.conf" -- default configuration file that program
+'tcppiped' uses. tcppipe.conf defines all the pipes that tcppiped is
+allowed to accept. Only one entry is allowed on each line. Lines that
+begin with '#' are ignored. The format of one entry is:
+
+    <hostname or IP address>:<absolute path of remote file> | <absolute path of local file>
+
+    For example, foo.com:/var/log/messages | /var/log/foo.com/messages
+
+which defines a pipe between file /var/log/messages on host foo.com
+and local file /var/log/foo.com/messages on destination host.  If
+any program writes something to /var/log/messages on foo.com, these
+appended lines will be sent to /var/log/foo.com/messages in realtime.
+
+Note that the configuration file can be changed on the fly, without
+restarting tcppiped. All newly added entries will be valid
+when tcppiped accepts new connections. But if an entry is deleted,
+an established pipe will not be closed. To close the pipes that are 
+no longer valid, tcppiped must be sent an HUP signal. tcppiped will 
+then reread the configuration file, terminate pipes that no longer 
+exist in the configuration file, and continue collecting messages 
+from all valid pipes.
+
+4. tcppipe -I -- Each tcppipe process is in charge of only one pipe.
+Thus, to rotate logs or to close a specific pipe, 
+the pid of tcppipe process which is in charge of this pipe must be known.
+The pid can be discovered using the -I option. (See the section of 
+Log Rotation for one important use of this option.)
+
+With the -I option, tcppipe wil print the pid of the tcppipe process 
+launched with the specified options. No new process is forked. 
+Only the -f -h and -p options are relevant in determining the pid. 
+( Normally, there should not be two tcppipe process with the same 
+three options running at the same time. If it is the case, the pid
+of the last process having the same options will be returned)
+ 
+The command
+
+     tcppipe -I -f <filename> -h <hostname> [-p port#]
+
+will return the pid of the tcppipe process that has the same
+options, if one exists. Otherwise, nothing will be printed.
+
+Possible shell scripts:  
+
+kill -HUP `tcppipe -f log -h archive.insnw.net -I`
+
+5. /var/run/tcppiped.pid -- the pid of the tcppiped daemon, which
+is used when you want to send the tcppiped daemon a signal.
+
+V. Some testable features
+
+1. Messages can be forwarded to multiple NOC simutaneously
+
+To do this multiple copies of tcppipe must be run on the host.
+Each copy updates files on different hosts based on the same 
+origin file. The pipes in each NOC must be defined so that 
+the tcppiped on that NOC will know where the destination file the 
+pipe is going to.
+
+2. Timeliness
+
+Messages are updated every second by default; the time interval
+can be set for individual files. The delay may be longer if the 
+network is congested.
+
+3. Handling Log Rotation
+
+Log Rotation is often performed to avoid huge log files. Most
+log-rotation programs can be configured to excute some commands when
+they rotate a file. This is necessary in some cases to
+avoid losing data. For example, a log rotator need to send syslogd
+a signal to ask it to reopen the log files. Log rotator should do the
+same thing to tcppipe or tcppiped when it rotates files used by
+tcppipe or tcppiped program. Specifically, it can send a HUP signal
+to tcppipe and tcppiped. When tcppipe and tcppiped receive this
+signal, they will close and then reopen the log files. This avoid
+any possible data loss that may occur during log rotation.
+
+Here is a brief description of the log-rotation process involving
+syslogd: 
+
+LR -- Log Rotation program 
+PIPE -- either tcppipe or tcppiped program 
+log -- log file
+
+a) LR moves log to log.1 ( syslogd and PIPE will writing to or reading
+from log.1) 
+b) LR create an empty file log 
+c) LR send a HUP signal to syslogd ( syslogd will close log.1 and write to log) d) LR send a HUP signal to PIPE (PIPE will close log.1 and read from log)
+
+4. Restart the programs. 
+
+If tcppipe terminates unintentionally for any reason, a status file is 
+stored in the /var/run directory. When tcppipe is restarted to process 
+the same file, it will know where to begin from. This makes sure the 
+same message will not be sent twice.
+
+The -n option can be used to send the entire file from the beginning instead
+of from where the last update was made, or when the status information is
+invalid, i.e. it is truncated to zero length.
+
+5. Keep it alive. 
+
+Ideally, a cron job should check to see if tcppipe or tcppiped is 
+running, and if not, restart them.
+
+A shell script "keep_tcppipe_alive" is include in the package, which has
+the same options as tcppipe and can be put into crontab file.
+
+For example, the crontab on a box may contain:  
+
+* * * * * /usr/bin/keep_tcppipe_alive -f /var/log/pocdemo/z1.log -h test.vpn.insnw.net
+
+This script tests whether the file /var/run/tcppipe.keepalive exists 
+before it spawns tcppipe again.  So this feature can be easily turned on or
+off, by touching or deleting /var/run/tcppipe.keepalive without editing 
+crontab each time. 
+
+6. Establishing a pipe
+
+A pipe is defined in /etc/tcppipe.conf between
+a origin file on the remote host to a destination file on the local
+host (where tcppiped is running). When tcppipe program
+is started on the remote host, it determines if the origin file
+(determined by -f option) exists. If so it then attempts
+to establish a tcp connection to tcppiped on the host (determined by
+-h option). If the tcppiped program is running on that host, tcppipe 
+and tcppiped will do handshake:
+
+i) tcppipe sends tcppiped which origin file it is going to send
+and to update later
+
+ii) tcppiped will look up in /etc/tcppipe.conf to find an entry
+for the same remote host and the same origin file.
+
+iii)If such an entry exists, which means the pipe is defined,
+tcppiped will try to open the destination file defined in that
+entry. If it is successful, tcppiped send a READY messages
+to tcppipe. The pipe is now established.
+
+iii) If no such an entry exists or the target file cannot be
+opened, tcppiped will send a REFUSE message to tcppipe. tcppipe on
+the remote host will close the connection and abort.
+
+Error messages
+
+Both tcppipe and tcppiped send error messages to syslog with the 
+facility tag of LOCAL5. These messages can be captured by modifying 
+syslog.conf.

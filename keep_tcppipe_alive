@@ -1,0 +1,10 @@
+#!/bin/sh
+
+# To turn on this feature, you must make sure file /var/run/tcppipe.keepalive
+# exists. You can delete the file to turn it off
+
+if [ -f "/var/run/tcppipe.keepalive" ]; then
+  TCPPIPE_PID=`tcppipe -I $@`
+  ps -p $TCPPIPE_PID 2>/dev/null | grep $TCPPIPE_PID >/dev/null 2>/dev/null\
+||tcppipe $@
+fi
